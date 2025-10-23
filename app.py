@@ -39,7 +39,15 @@ except Exception as e:
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, 
+     origins=[
+         "http://localhost:3000",
+         "https://heri-front.vercel.app",
+         "https://*.vercel.app"
+     ],
+     methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+     allow_headers=['Content-Type', 'Authorization'],
+     supports_credentials=True)
 
 print("Backend running without Firebase (optional)")
 
@@ -48,6 +56,11 @@ UPLOAD_FOLDER = 'uploads'
 PROCESSED_FOLDER = 'processed'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
+
+@app.route('/api/<path:path>', methods=['OPTIONS'])
+def handle_options(path):
+    """Handle preflight OPTIONS requests for all API routes"""
+    return jsonify({'status': 'ok'}), 200
 
 @app.route('/')
 def home():
@@ -66,11 +79,34 @@ def health_check():
         'ai_status': 'ready' if AI_MODELS_LOADED else 'basic'
     })
 
-@app.route('/api/auto-analyze', methods=['POST'])
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin')
+    allowed_origins = [
+        'http://localhost:3000',
+        'https://heri-front.vercel.app',
+        'https://heri-front-git-main-heri-front.vercel.app',
+        'https://heri-front-heri-front.vercel.app'
+    ]
+    
+    if origin in allowed_origins or origin and origin.endswith('.vercel.app'):
+        response.headers.add('Access-Control-Allow-Origin', origin)
+    else:
+        response.headers.add('Access-Control-Allow-Origin', '*')
+    
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    response.headers.add('Access-Control-Allow-Credentials', 'true')
+    return response
+
+@app.route('/api/auto-analyze', methods=['POST', 'OPTIONS'])
 def auto_analyze_image():
     """
     Automatically analyze uploaded image and provide Wikipedia info
     """
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
+        
     try:
         data = request.json
         image_data = data.get('image')
@@ -92,9 +128,12 @@ def auto_analyze_image():
         print(f"Auto-analysis error: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/process-image', methods=['POST'])
+@app.route('/api/process-image', methods=['POST', 'OPTIONS'])
 def process_image():
     """Process image with advanced AI"""
+    if request.method == 'OPTIONS':
+        return jsonify({'status': 'ok'}), 200
+        
     try:
         if 'image' not in request.files:
             return jsonify({'error': 'No image file provided'}), 400
@@ -163,12 +202,11 @@ def process_image():
             print(f"Processed image uploaded: {processed_url}")
             
         except Exception as upload_error:
-            print(f"External upload failed, falling back to base64: {upload_error}")
-            # Fallback to base64 if external upload fails
-            buffered = io.BytesIO()
-            processed_image.save(buffered, format="JPEG", quality=90, optimize=False)
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            processed_url = f"data:image/jpeg;base64,{img_str}"
+            print(f"External upload failed: {upload_error}")
+            return jsonify({
+                'error': 'Image upload service unavailable. Please try again later.',
+                'details': str(upload_error)
+            }), 503
         
         return jsonify({
             'status': 'success',
