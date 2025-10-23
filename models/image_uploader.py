@@ -23,7 +23,7 @@ def upload_image_to_external_api(image_data: bytes, filename: str) -> Dict[str, 
     try:
         # Prepare multipart form data
         files = {
-            'image': (filename, image_data, 'image/jpeg')
+            'photo': (filename, image_data, 'image/jpeg')
         }
         
         print(f"Uploading image to external API: {filename}")
