@@ -1,6 +1,6 @@
 """
-External Image Upload Service
-Handles image uploads to Firebase Storage and fallback services
+Free Image Upload Service
+Handles image uploads to free hosting services with local fallback
 """
 
 import requests
@@ -9,27 +9,10 @@ import json
 import base64
 from typing import Dict, Any, Optional
 from datetime import datetime
-from google.oauth2 import service_account
-from google.auth.transport.requests import Request
-
-# Firebase configuration
-FIREBASE_PROJECT_ID = os.getenv('FIREBASE_PROJECT_ID', 'digi-pet-8b8f8')
-FIREBASE_STORAGE_BUCKET = os.getenv('FIREBASE_STORAGE_BUCKET', 'digi-pet-8b8f8.firebasestorage.app')
-
-# Service account path
-SERVICE_ACCOUNT_PATH = os.path.join(os.path.dirname(__file__), '..', 'digi-pet-8b8f8-firebase-adminsdk-fbsvc-d5672db7f7.json')
-
-# Cloudinary configuration
-CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME', 'your-cloud-name')
-CLOUDINARY_API_KEY = os.getenv('CLOUDINARY_API_KEY', 'your-api-key')
-CLOUDINARY_API_SECRET = os.getenv('CLOUDINARY_API_SECRET', 'your-api-secret')
-
-# ImgBB configuration
-IMGBB_API_KEY = os.getenv('IMGBB_API_KEY', '2d7f3e0e6f8a9c4b5d1a2e3f4c5b6a7d')
 
 def upload_image_to_external_api(image_data: bytes, filename: str) -> Dict[str, Any]:
     """
-    Upload image to external service with multiple fallbacks
+    Upload image to free hosting services with multiple fallbacks
     
     Args:
         image_data: Raw image bytes
@@ -42,11 +25,10 @@ def upload_image_to_external_api(image_data: bytes, filename: str) -> Dict[str, 
     timestamp = int(datetime.now().timestamp())
     unique_filename = f"{timestamp}_{filename}"
     
-    # Try multiple upload services in order of preference
+    # Try multiple FREE upload services in order of preference
     upload_methods = [
-        ("Firebase Storage", upload_to_firebase_storage),
-        ("ImgBB", upload_to_imgbb_fallback),
-        ("Cloudinary", upload_to_cloudinary_fallback),
+        ("Imgur", upload_to_imgur),
+        ("Postimages", upload_to_postimages),
         ("Local Storage", upload_to_local_storage)
     ]
     
@@ -67,75 +49,93 @@ def upload_image_to_external_api(image_data: bytes, filename: str) -> Dict[str, 
     print("⚠️ All external uploads failed, using local storage as final fallback")
     return upload_to_local_storage(image_data, unique_filename)
 
-def get_firebase_access_token():
-    """Get Firebase access token using service account"""
+def upload_to_imgur(image_data: bytes, filename: str) -> Dict[str, Any]:
+    """Upload image to Imgur (free, anonymous upload)"""
     try:
-        if not os.path.exists(SERVICE_ACCOUNT_PATH):
-            raise Exception("Firebase service account file not found")
+        # Convert image to base64
+        image_b64 = base64.b64encode(image_data).decode('utf-8')
         
-        credentials = service_account.Credentials.from_service_account_file(
-            SERVICE_ACCOUNT_PATH,
-            scopes=['https://www.googleapis.com/auth/firebase']
-        )
-        
-        request = Request()
-        credentials.refresh(request)
-        return credentials.token
-    except Exception as e:
-        raise Exception(f"Failed to get Firebase access token: {e}")
-
-def upload_to_firebase_storage(image_data: bytes, filename: str) -> Dict[str, Any]:
-    """Upload image to Firebase Storage with proper authentication"""
-    try:
-        # Get access token
-        access_token = get_firebase_access_token()
-        
-        # Generate unique filename with timestamp
-        timestamp = int(datetime.now().timestamp())
-        unique_filename = f"processed_images/{timestamp}_{filename}"
-        
-        print(f"Uploading to Firebase Storage: {unique_filename}")
-        
-        # Firebase Storage REST API endpoint
-        upload_url = f"https://firebasestorage.googleapis.com/v0/b/{FIREBASE_STORAGE_BUCKET}/o?name={unique_filename}"
-        
-        # Upload image data with authentication
+        # Imgur anonymous upload
         headers = {
-            'Content-Type': 'image/jpeg',
-            'Authorization': f'Bearer {access_token}'
+            'Authorization': 'Client-ID 546c25a59c58ad7'  # Anonymous client ID
+        }
+        
+        payload = {
+            'image': image_b64,
+            'type': 'base64',
+            'title': filename.split('.')[0]
         }
         
         response = requests.post(
-            upload_url,
-            data=image_data,
+            'https://api.imgur.com/3/image',
             headers=headers,
+            data=payload,
             timeout=30
         )
         
-        if response.status_code not in [200, 201]:
-            raise Exception(f"Firebase upload failed: {response.status_code} {response.text}")
+        if response.status_code != 200:
+            raise Exception(f"Imgur upload failed: {response.status_code} {response.text}")
         
-        upload_result = response.json()
+        result = response.json()
         
-        # Get the download URL
-        download_token = upload_result.get('downloadTokens')
-        if download_token:
-            public_url = f"https://firebasestorage.googleapis.com/v0/b/{FIREBASE_STORAGE_BUCKET}/o/{unique_filename.replace('/', '%2F')}?alt=media&token={download_token}"
-        else:
-            public_url = f"https://firebasestorage.googleapis.com/v0/b/{FIREBASE_STORAGE_BUCKET}/o/{unique_filename.replace('/', '%2F')}?alt=media"
+        if not result.get('success'):
+            raise Exception(f"Imgur error: {result.get('data', {}).get('error', 'Unknown error')}")
+        
+        image_data_response = result['data']
         
         return {
             'success': True,
             'data': {
-                'filename': unique_filename,
-                'url': public_url,
+                'filename': filename,
+                'url': image_data_response['link'],
+                'size': len(image_data),
+                'type': 'image/jpeg',
+                'delete_hash': image_data_response.get('deletehash')  # For deletion later
+            }
+        }
+        
+    except Exception as e:
+        raise Exception(f"Imgur upload failed: {e}")
+
+def upload_to_postimages(image_data: bytes, filename: str) -> Dict[str, Any]:
+    """Upload image to Postimages (free hosting)"""
+    try:
+        # Convert image to base64
+        image_b64 = base64.b64encode(image_data).decode('utf-8')
+        
+        # Postimages upload
+        payload = {
+            'upload': image_b64,
+            'optsize': '0',  # Original size
+            'expire': '0'    # Never expire
+        }
+        
+        response = requests.post(
+            'https://postimages.org/json/rr',
+            data=payload,
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"Postimages upload failed: {response.status_code}")
+        
+        result = response.json()
+        
+        if result.get('status') != 'OK':
+            raise Exception(f"Postimages error: {result.get('error', 'Unknown error')}")
+        
+        return {
+            'success': True,
+            'data': {
+                'filename': filename,
+                'url': result['url'],
                 'size': len(image_data),
                 'type': 'image/jpeg'
             }
         }
         
     except Exception as e:
-        raise Exception(f"Firebase Storage upload failed: {e}")
+        raise Exception(f"Postimages upload failed: {e}")
 
 def upload_to_local_storage(image_data: bytes, filename: str) -> Dict[str, Any]:
     """Save image locally as fallback"""
@@ -165,110 +165,42 @@ def upload_to_local_storage(image_data: bytes, filename: str) -> Dict[str, Any]:
     except Exception as e:
         raise Exception(f"Local storage failed: {e}")
 
-def upload_to_imgbb_fallback(image_data: bytes, filename: str) -> Dict[str, Any]:
-    """Fallback to ImgBB if Firebase fails"""
-    image_b64 = base64.b64encode(image_data).decode('utf-8')
-    
-    payload = {
-        'key': IMGBB_API_KEY,
-        'image': image_b64,
-        'name': filename.split('.')[0]
-    }
-    
-    response = requests.post("https://api.imgbb.com/1/upload", data=payload, timeout=30)
-    
-    if response.status_code != 200:
-        raise Exception(f"ImgBB failed: {response.status_code} {response.text}")
-    
-    result = response.json()
-    
-    if not result.get('success'):
-        raise Exception(f"ImgBB error: {result.get('error', {}).get('message', 'Unknown error')}")
-    
-    return {
-        'success': True,
-        'data': {
-            'filename': result['data'].get('title', filename),
-            'url': result['data']['url'],
-            'size': result['data'].get('size', len(image_data)),
-            'type': 'image/jpeg'
-        }
-    }
-
-def upload_to_cloudinary_fallback(image_data: bytes, filename: str) -> Dict[str, Any]:
-    """Fallback to Cloudinary if other services fail"""
-    if CLOUDINARY_CLOUD_NAME == 'your-cloud-name':
-        raise Exception("Cloudinary not configured")
-    
-    import hashlib
-    
-    # Generate signature for Cloudinary
-    timestamp = int(datetime.now().timestamp())
-    public_id = f"processed_{timestamp}_{filename.split('.')[0]}"
-    
-    params = {
-        'public_id': public_id,
-        'timestamp': timestamp,
-        'api_key': CLOUDINARY_API_KEY
-    }
-    
-    # Create signature
-    params_string = '&'.join([f"{k}={v}" for k, v in sorted(params.items())])
-    signature = hashlib.sha1(f"{params_string}{CLOUDINARY_API_SECRET}".encode()).hexdigest()
-    
-    # Upload to Cloudinary
-    files = {'file': image_data}
-    data = {**params, 'signature': signature}
-    
-    response = requests.post(
-        f'https://api.cloudinary.com/v1_1/{CLOUDINARY_CLOUD_NAME}/image/upload',
-        files=files,
-        data=data,
-        timeout=30
-    )
-    
-    if response.status_code != 200:
-        raise Exception(f"Cloudinary failed: {response.status_code} {response.text}")
-    
-    result = response.json()
-    
-    return {
-        'success': True,
-        'data': {
-            'filename': result.get('public_id', filename),
-            'url': result['secure_url'],
-            'size': result.get('bytes', len(image_data)),
-            'type': 'image/jpeg'
-        }
-    }
-
-def delete_image_from_external_api(image_url: str) -> bool:
+def delete_image_from_service(image_url: str, delete_hash: str = None) -> bool:
     """
-    Delete image from external API service
+    Delete image from hosting service
     
     Args:
         image_url: Full URL of the image to delete
+        delete_hash: Delete hash for Imgur (if available)
         
     Returns:
         True if successful, False otherwise
     """
     try:
-        # Extract filename from URL
-        filename = image_url.split('/')[-1]
+        # Check if it's an Imgur URL and we have delete hash
+        if 'imgur.com' in image_url and delete_hash:
+            print(f"Deleting image from Imgur: {delete_hash}")
+            
+            headers = {
+                'Authorization': 'Client-ID 546c25a59c58ad7'
+            }
+            
+            response = requests.delete(
+                f'https://api.imgur.com/3/image/{delete_hash}',
+                headers=headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                print(f"Image deleted successfully from Imgur")
+                return True
+            else:
+                print(f"Imgur delete failed: {response.status_code} {response.text}")
+                return False
         
-        print(f"Deleting image from external API: {filename}")
-        
-        response = requests.delete(
-            f"{IMAGE_API_BASE}/delete/{filename}",
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            print(f"Image deleted successfully: {filename}")
-            return True
-        else:
-            print(f"Delete failed: {response.status_code} {response.text}")
-            return False
+        # For other services or local files, we can't delete them
+        print(f"Cannot delete image from this service: {image_url}")
+        return False
             
     except Exception as e:
         print(f"Error deleting image: {e}")
