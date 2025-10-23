@@ -1,3 +1,18 @@
+Flask==3.0.3
+Flask-CORS==4.0.0
+Werkzeug==3.0.3
+python-dotenv==1.0.1
+Pillow==9.5.0
+numpy==1.26.4
+opencv-python==4.9.0.80
+google-generativeai==0.3.2
+openai==1.3.0
+requests==2.31.0
+urllib3==2.1.0
+pandas==2.2.2
+python-dateutil==2.9.0.post0
+pytz==2024.1
+gunicorn==21.2.0
 # ============================================================
 # Heri-Sci Backend Requirements (Render Compatible)
 # Python 3.11.x
