@@ -143,11 +143,32 @@ def process_image():
         else:
             return jsonify({'error': 'Invalid process type'}), 400
         
-        # Convert to base64 (FAST JPEG!)
-        buffered = io.BytesIO()
-        processed_image.save(buffered, format="JPEG", quality=90, optimize=False)
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        processed_url = f"data:image/jpeg;base64,{img_str}"
+        # Upload processed image to external API
+        try:
+            from models.image_uploader import upload_image_to_external_api
+            
+            # Convert processed image to bytes
+            buffered = io.BytesIO()
+            processed_image.save(buffered, format="JPEG", quality=90, optimize=True)
+            processed_bytes = buffered.getvalue()
+            
+            # Generate unique filename
+            timestamp = int(datetime.now().timestamp())
+            processed_filename = f"processed_{process_type}_{timestamp}.jpg"
+            
+            # Upload to external API
+            upload_result = upload_image_to_external_api(processed_bytes, processed_filename)
+            processed_url = upload_result['data']['url']
+            
+            print(f"Processed image uploaded: {processed_url}")
+            
+        except Exception as upload_error:
+            print(f"External upload failed, falling back to base64: {upload_error}")
+            # Fallback to base64 if external upload fails
+            buffered = io.BytesIO()
+            processed_image.save(buffered, format="JPEG", quality=90, optimize=False)
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            processed_url = f"data:image/jpeg;base64,{img_str}"
         
         return jsonify({
             'status': 'success',
