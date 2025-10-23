@@ -46,6 +46,11 @@ logs/
 .coverage
 htmlcov/
 
+# Firebase credentials
+*firebase-adminsdk*.json
+*serviceAccountKey*.json
+firebase-credentials.json
+
 # Misc
 *.pem
 .vercel

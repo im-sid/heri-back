@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import os
 import io
@@ -56,6 +56,11 @@ UPLOAD_FOLDER = 'uploads'
 PROCESSED_FOLDER = 'processed'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROCESSED_FOLDER, exist_ok=True)
+
+@app.route('/uploads/<filename>')
+def serve_upload(filename):
+    """Serve uploaded files"""
+    return send_from_directory('uploads', filename)
 
 @app.route('/api/<path:path>', methods=['OPTIONS'])
 def handle_options(path):
